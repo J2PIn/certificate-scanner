@@ -40,9 +40,6 @@ const requiredAssumptions = [
 for (const key of requiredAssumptions) {
   if (!Number.isFinite(assumptions[key])) {
     console.error(`Missing required env input: ${key}`);
-    console.error("");
-    console.error("Example:");
-    console.error(`UNDERLYING_PRICE=18450 UNDERLYING_MOVE_PCT=-1.32 IV_ANNUAL_PCT=24.5 HOURS_LEFT=3.5 RSI4=18.5 EMA8=18472 EMA21=18518 EMA65=18610 MA50=18640 MA200=18820 VWAP=18555 npm run build:data`);
     process.exit(1);
   }
 }
@@ -100,24 +97,29 @@ function parseTsv(text) {
 
 function estimatedKnockoutLevel(direction, underlyingPrice, leverage) {
   const distance = 1 / leverage;
-
-  if (direction === "BULL") {
-    return underlyingPrice * (1 - distance);
-  }
-
+  if (direction === "BULL") return underlyingPrice * (1 - distance);
   return underlyingPrice * (1 + distance);
 }
 
 const raw = fs.readFileSync(INPUT);
-
-// Nordnet CSV export is UTF-16LE with BOM.
 const text = raw.toString("utf16le").replace(/^\uFEFF/, "");
 const parsed = parseTsv(text);
 
 const certificates = parsed
-  .filter((row) => String(row["Kohde-etuus"] || "").toLowerCase().includes("nasdaq"))
+  .filter((row) => {
+    const underlying = String(row["Kohde-etuus"] || "").toLowerCase();
+    const name = String(row["Nimi"] || "").toLowerCase();
+
+    return (
+      underlying.includes("nasdaq") ||
+      underlying.includes("ustech") ||
+      name.includes("nasdaq") ||
+      name.includes("ustech")
+    );
+  })
   .map((row) => {
-    const direction = String(row["Näkemys"]).toLowerCase() === "long" ? "BULL" : "BEAR";
+    const view = String(row["Näkemys"] || "").toLowerCase();
+    const direction = view === "long" ? "BULL" : "BEAR";
     const leverage = parseNumber(row["Vipu"]);
     const bid = parseNumber(row["Osto"]);
     const ask = parseNumber(row["Myynti"]);
