@@ -376,6 +376,20 @@ export default function CertificateScannerDashboard() {
   const [marketSnapshot, setMarketSnapshot] = useState(null);
   const [marketStatus, setMarketStatus] = useState("Loading /data/market-snapshot.json …");
   const [marketFetchedAt, setMarketFetchedAt] = useState(null);
+  const [localSnapshot, setLocalSnapshot] = useState(null);
+  const [snapshotForm, setSnapshotForm] = useState({
+    underlyingPrice: "",
+    underlyingMovePct: "",
+    ivAnnualPct: "24.5",
+    hoursLeft: "3.5",
+    rsi4: "50",
+    ema8: "",
+    ema21: "",
+    ema65: "",
+    ma50: "",
+    ma200: "",
+    vwap: "",
+  });
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("ALL");
   const [minSurvival, setMinSurvival] = useState(0);
@@ -445,9 +459,68 @@ export default function CertificateScannerDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("certificate-scanner:localSnapshot");
+      if (saved) setLocalSnapshot(JSON.parse(saved));
+    } catch {
+      // ignore invalid local snapshot
+    }
+  }, []);
+
+  const activeMarketSnapshot = localSnapshot || marketSnapshot;
+
+  function applyLocalSnapshot(event) {
+    event.preventDefault();
+    const price = Number(snapshotForm.underlyingPrice);
+    const move = Number(snapshotForm.underlyingMovePct);
+    const iv = Number(snapshotForm.ivAnnualPct);
+    const hours = Number(snapshotForm.hoursLeft);
+    const rsi = Number(snapshotForm.rsi4);
+    const ema8 = Number(snapshotForm.ema8 || snapshotForm.underlyingPrice);
+    const ema21 = Number(snapshotForm.ema21 || snapshotForm.underlyingPrice);
+    const ema65 = Number(snapshotForm.ema65 || snapshotForm.underlyingPrice);
+    const ma50 = Number(snapshotForm.ma50 || snapshotForm.underlyingPrice);
+    const ma200 = Number(snapshotForm.ma200 || snapshotForm.underlyingPrice);
+    const vwap = Number(snapshotForm.vwap || snapshotForm.underlyingPrice);
+
+    if (![price, move, iv, hours, rsi, ema8, ema21, ema65, ma50, ma200, vwap].every(Number.isFinite)) {
+      alert("Please fill current price, move %, IV, hours left, and RSI4 with valid numbers.");
+      return;
+    }
+
+    const snapshot = {
+      snapshotTime: new Date().toISOString(),
+      source: "Browser local manual override",
+      underlyings: {
+        USTECH100: {
+          underlyingPrice: price,
+          underlyingMovePct: move,
+          ivAnnualPct: iv,
+          hoursLeft: hours,
+          rsi4: rsi,
+          ema8,
+          ema21,
+          ema65,
+          ma50,
+          ma200,
+          vwap,
+        },
+      },
+    };
+
+    setLocalSnapshot(snapshot);
+    window.localStorage.setItem("certificate-scanner:localSnapshot", JSON.stringify(snapshot));
+  }
+
+  function clearLocalSnapshot() {
+    setLocalSnapshot(null);
+    window.localStorage.removeItem("certificate-scanner:localSnapshot");
+  }
+
   const rows = useMemo(() => {
     const overlayedRows = sourceRows.map((row) => {
-      const live = marketSnapshot?.underlyings?.[row.underlying] || marketSnapshot?.underlyings?.[row.issuerUnderlying];
+      const live = activeMarketSnapshot?.underlyings?.[row.underlying] || activeMarketSnapshot?.underlyings?.[row.issuerUnderlying];
       if (!live) return row;
 
       const merged = {
@@ -463,7 +536,7 @@ export default function CertificateScannerDashboard() {
         ma50: live.ma50 ?? row.ma50,
         ma200: live.ma200 ?? row.ma200,
         vwap: live.vwap ?? row.vwap,
-        marketSnapshotTime: live.snapshotTime ?? marketSnapshot?.snapshotTime,
+        marketSnapshotTime: live.snapshotTime ?? activeMarketSnapshot?.snapshotTime,
       };
 
       if (merged.koEstimated && Number.isFinite(Number(merged.leverage)) && Number.isFinite(Number(merged.underlyingPrice))) {
@@ -486,11 +559,11 @@ export default function CertificateScannerDashboard() {
         return matchesQuery && matchesDirection && matchesSurvival && matchesSpread;
       })
       .sort((a, b) => b.metrics.score - a.metrics.score);
-  }, [sourceRows, marketSnapshot, query, direction, minSurvival, maxSpread]);
+  }, [sourceRows, activeMarketSnapshot, query, direction, minSurvival, maxSpread]);
 
   const best = rows[0];
   const assumptionInfo = useMemo(() => assumptionsSummary(sourceRows, dataMeta), [sourceRows, dataMeta]);
-  const freshness = useMemo(() => snapshotFreshness(marketSnapshot), [marketSnapshot, marketFetchedAt]);
+  const freshness = useMemo(() => snapshotFreshness(activeMarketSnapshot), [activeMarketSnapshot, marketFetchedAt]);
   const buckets = useMemo(() => bucketCounts(rows), [rows]);
   const topCandidates = useMemo(
     () => rows.filter((row) => ["Candidate", "Watch"].includes(row.metrics?.verdict)).slice(0, 10),
@@ -511,8 +584,8 @@ export default function CertificateScannerDashboard() {
                 Ranks leveraged bull/bear certificates by expected underlying move, distance to knockout, spread cost, trend alignment, and RSI exhaustion risk.
               </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-400">
-                <Pill tone={marketSnapshot ? "good" : "warn"}>{marketStatus}</Pill>
-                {marketSnapshot?.snapshotTime && <Pill>File time {marketSnapshot.snapshotTime}</Pill>}
+                <Pill tone={activeMarketSnapshot ? "good" : "warn"}>{localSnapshot ? "Browser override active" : marketStatus}</Pill>
+                {activeMarketSnapshot?.snapshotTime && <Pill>Snapshot {activeMarketSnapshot.snapshotTime}</Pill>}
                 {marketFetchedAt && <Pill>Fetched local {marketFetchedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</Pill>}
               </div>
               {dataMeta && (
@@ -558,6 +631,35 @@ export default function CertificateScannerDashboard() {
           <div className={`mt-4 rounded-2xl border p-3 text-sm ${freshness.tone === "good" ? "border-emerald-500/20 bg-emerald-950/20 text-emerald-100" : freshness.tone === "warn" ? "border-amber-500/20 bg-amber-950/20 text-amber-100" : "border-rose-500/20 bg-rose-950/20 text-rose-100"}`}>
             {freshness.warning}
           </div>
+        </div>
+
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl">
+          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <div className="text-base font-semibold text-zinc-100">Browser-only market override</div>
+              <p className="mt-1 text-sm text-zinc-400">
+                Use this during the session when GitHub uploads are too slow. It updates scoring in this browser only and stores the snapshot in localStorage.
+              </p>
+            </div>
+            {localSnapshot && <Pill tone="good">Local override active</Pill>}
+          </div>
+          <form onSubmit={applyLocalSnapshot} className="grid gap-3 md:grid-cols-6">
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="Price" value={snapshotForm.underlyingPrice} onChange={(e) => setSnapshotForm({ ...snapshotForm, underlyingPrice: e.target.value })} />
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="Move %" value={snapshotForm.underlyingMovePct} onChange={(e) => setSnapshotForm({ ...snapshotForm, underlyingMovePct: e.target.value })} />
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="IV %" value={snapshotForm.ivAnnualPct} onChange={(e) => setSnapshotForm({ ...snapshotForm, ivAnnualPct: e.target.value })} />
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="Hours left" value={snapshotForm.hoursLeft} onChange={(e) => setSnapshotForm({ ...snapshotForm, hoursLeft: e.target.value })} />
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="RSI4" value={snapshotForm.rsi4} onChange={(e) => setSnapshotForm({ ...snapshotForm, rsi4: e.target.value })} />
+            <button type="submit" className="rounded-2xl bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-white">Apply</button>
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="EMA8 optional" value={snapshotForm.ema8} onChange={(e) => setSnapshotForm({ ...snapshotForm, ema8: e.target.value })} />
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="EMA21 optional" value={snapshotForm.ema21} onChange={(e) => setSnapshotForm({ ...snapshotForm, ema21: e.target.value })} />
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="EMA65 optional" value={snapshotForm.ema65} onChange={(e) => setSnapshotForm({ ...snapshotForm, ema65: e.target.value })} />
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="MA50 optional" value={snapshotForm.ma50} onChange={(e) => setSnapshotForm({ ...snapshotForm, ma50: e.target.value })} />
+            <input className="rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="MA200 optional" value={snapshotForm.ma200} onChange={(e) => setSnapshotForm({ ...snapshotForm, ma200: e.target.value })} />
+            <div className="flex gap-2">
+              <input className="min-w-0 flex-1 rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm outline-none focus:border-zinc-600" placeholder="VWAP optional" value={snapshotForm.vwap} onChange={(e) => setSnapshotForm({ ...snapshotForm, vwap: e.target.value })} />
+              <button type="button" onClick={clearLocalSnapshot} className="rounded-2xl border border-zinc-700 px-4 py-3 text-sm text-zinc-300 hover:border-zinc-500">Clear</button>
+            </div>
+          </form>
         </div>
 
         <div className="grid gap-4 md:grid-cols-6">
