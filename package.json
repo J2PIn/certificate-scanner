@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build:data": "node scripts/build-certificates.mjs",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "build:data": "node scripts/build-certificates.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
     "framer-motion": "^12.38.0",
