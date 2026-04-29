@@ -293,6 +293,7 @@ function qualityTone(q) {
 export default function CertificateScannerDashboard() {
   const [sourceRows, setSourceRows] = useState(mockRows);
   const [dataStatus, setDataStatus] = useState("Loading /data/certificates.json …");
+  const [dataMeta, setDataMeta] = useState(null);
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("ALL");
   const [minSurvival, setMinSurvival] = useState(0);
@@ -306,14 +307,18 @@ export default function CertificateScannerDashboard() {
         const res = await fetch("/data/certificates.json", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (!Array.isArray(data)) throw new Error("certificates.json must be an array");
+        const rows = Array.isArray(data) ? data : data.certificates;
+        const meta = Array.isArray(data) ? null : data.meta || null;
+        if (!Array.isArray(rows)) throw new Error("certificates.json must be an array or { meta, certificates }");
         if (alive) {
-          setSourceRows(data.length ? data : mockRows);
-          setDataStatus(data.length ? `Loaded ${data.length} rows from certificates.json` : "certificates.json is empty; using mock rows");
+          setSourceRows(rows.length ? rows : mockRows);
+          setDataMeta(meta);
+          setDataStatus(rows.length ? `Loaded ${rows.length} rows from certificates.json` : "certificates.json is empty; using mock rows");
         }
       } catch (err) {
         if (alive) {
           setSourceRows(mockRows);
+          setDataMeta(null);
           setDataStatus(`Using mock rows — could not load certificates.json: ${err.message}`);
         }
       }
@@ -354,6 +359,13 @@ export default function CertificateScannerDashboard() {
               <p className="mt-3 max-w-3xl text-zinc-400">
                 Ranks leveraged bull/bear certificates by expected underlying move, distance to knockout, spread cost, trend alignment, and RSI exhaustion risk.
               </p>
+              {dataMeta && (
+                <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-400">
+                  {dataMeta.snapshotTime && <Pill>Snapshot {dataMeta.snapshotTime}</Pill>}
+                  {dataMeta.source && <Pill>Source {dataMeta.source}</Pill>}
+                  {dataMeta.notes && <Pill>{dataMeta.notes}</Pill>}
+                </div>
+              )}
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 md:w-80">
               <div className="text-sm text-zinc-500">Current top row</div>
