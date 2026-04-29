@@ -1,0 +1,19 @@
+{
+  "snapshotTime": "2026-04-29 10:45 EEST",
+  "source": "Manual USTECH100 snapshot",
+  "underlyings": {
+    "USTECH100": {
+      "underlyingPrice": 27092,
+      "underlyingMovePct": -1.32,
+      "ivAnnualPct": 24.5,
+      "hoursLeft": 3.5,
+      "rsi4": 18.5,
+      "ema8": 27092,
+      "ema21": 27092,
+      "ema65": 27092,
+      "ma50": 27092,
+      "ma200": 27092,
+      "vwap": 27092
+    }
+  }
+}
