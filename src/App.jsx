@@ -321,6 +321,7 @@ export default function CertificateScannerDashboard() {
   const [dataMeta, setDataMeta] = useState(null);
   const [marketSnapshot, setMarketSnapshot] = useState(null);
   const [marketStatus, setMarketStatus] = useState("Loading /data/market-snapshot.json …");
+  const [marketFetchedAt, setMarketFetchedAt] = useState(null);
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("ALL");
   const [minSurvival, setMinSurvival] = useState(0);
@@ -369,11 +370,13 @@ export default function CertificateScannerDashboard() {
         if (!data || typeof data !== "object") throw new Error("market-snapshot.json must be an object");
         if (alive) {
           setMarketSnapshot(data);
-          setMarketStatus(`Market snapshot ${data.snapshotTime || "loaded"}`);
+          setMarketFetchedAt(new Date());
+          setMarketStatus(`Market snapshot loaded`);
         }
       } catch (err) {
         if (alive) {
           setMarketSnapshot(null);
+          setMarketFetchedAt(null);
           setMarketStatus("No live snapshot — using certificate JSON assumptions");
         }
       }
@@ -449,6 +452,8 @@ export default function CertificateScannerDashboard() {
               </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-400">
                 <Pill tone={marketSnapshot ? "good" : "warn"}>{marketStatus}</Pill>
+                {marketSnapshot?.snapshotTime && <Pill>File time {marketSnapshot.snapshotTime}</Pill>}
+                {marketFetchedAt && <Pill>Fetched local {marketFetchedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</Pill>}
               </div>
               {dataMeta && (
                 <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-400">
