@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Search, Activity, ShieldAlert, TrendingUp, TrendingDown, SlidersHorizontal } from "lucide-react";
 
@@ -175,13 +175,42 @@ function verdictTone(v) {
 }
 
 export default function CertificateScannerDashboard() {
+  const [sourceRows, setSourceRows] = useState(mockRows);
+  const [dataStatus, setDataStatus] = useState("Loading /data/certificates.json …");
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("ALL");
   const [minSurvival, setMinSurvival] = useState(0);
   const [maxSpread, setMaxSpread] = useState(5);
 
+  useEffect(() => {
+    let alive = true;
+
+    async function loadCertificates() {
+      try {
+        const res = await fetch("/data/certificates.json", { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!Array.isArray(data)) throw new Error("certificates.json must be an array");
+        if (alive) {
+          setSourceRows(data.length ? data : mockRows);
+          setDataStatus(data.length ? `Loaded ${data.length} rows from certificates.json` : "certificates.json is empty; using mock rows");
+        }
+      } catch (err) {
+        if (alive) {
+          setSourceRows(mockRows);
+          setDataStatus(`Using mock rows — could not load certificates.json: ${err.message}`);
+        }
+      }
+    }
+
+    loadCertificates();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const rows = useMemo(() => {
-    return mockRows
+    return sourceRows
       .map((row) => ({ ...row, metrics: classify(row) }))
       .filter((row) => {
         const q = query.trim().toLowerCase();
@@ -192,7 +221,7 @@ export default function CertificateScannerDashboard() {
         return matchesQuery && matchesDirection && matchesSurvival && matchesSpread;
       })
       .sort((a, b) => b.metrics.score - a.metrics.score);
-  }, [query, direction, minSurvival, maxSpread]);
+  }, [sourceRows, query, direction, minSurvival, maxSpread]);
 
   const best = rows[0];
 
@@ -203,7 +232,7 @@ export default function CertificateScannerDashboard() {
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-sm text-zinc-300">
-                <Activity size={16} /> Live certificate scanner MVP
+                <Activity size={16} /> {dataStatus}
               </div>
               <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">IV-adjusted Nordnet certificate dashboard</h1>
               <p className="mt-3 max-w-3xl text-zinc-400">
