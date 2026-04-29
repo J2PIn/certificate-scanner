@@ -319,6 +319,8 @@ export default function CertificateScannerDashboard() {
   const [sourceRows, setSourceRows] = useState(mockRows);
   const [dataStatus, setDataStatus] = useState("Loading /data/certificates.json …");
   const [dataMeta, setDataMeta] = useState(null);
+  const [marketSnapshot, setMarketSnapshot] = useState(null);
+  const [marketStatus, setMarketStatus] = useState("Loading /data/market-snapshot.json …");
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("ALL");
   const [minSurvival, setMinSurvival] = useState(0);
@@ -355,8 +357,68 @@ export default function CertificateScannerDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    let timer = null;
+
+    async function loadMarketSnapshot() {
+      try {
+        const res = await fetch(`/data/market-snapshot.json?t=${Date.now()}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data || typeof data !== "object") throw new Error("market-snapshot.json must be an object");
+        if (alive) {
+          setMarketSnapshot(data);
+          setMarketStatus(`Market snapshot ${data.snapshotTime || "loaded"}`);
+        }
+      } catch (err) {
+        if (alive) {
+          setMarketSnapshot(null);
+          setMarketStatus("No live snapshot — using certificate JSON assumptions");
+        }
+      }
+    }
+
+    loadMarketSnapshot();
+    timer = setInterval(loadMarketSnapshot, 30000);
+
+    return () => {
+      alive = false;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
+
   const rows = useMemo(() => {
-    return sourceRows
+    const overlayedRows = sourceRows.map((row) => {
+      const live = marketSnapshot?.underlyings?.[row.underlying] || marketSnapshot?.underlyings?.[row.issuerUnderlying];
+      if (!live) return row;
+
+      const merged = {
+        ...row,
+        underlyingPrice: live.underlyingPrice ?? row.underlyingPrice,
+        underlyingMovePct: live.underlyingMovePct ?? row.underlyingMovePct,
+        ivAnnualPct: live.ivAnnualPct ?? row.ivAnnualPct,
+        hoursLeft: live.hoursLeft ?? row.hoursLeft,
+        rsi4: live.rsi4 ?? row.rsi4,
+        ema8: live.ema8 ?? row.ema8,
+        ema21: live.ema21 ?? row.ema21,
+        ema65: live.ema65 ?? row.ema65,
+        ma50: live.ma50 ?? row.ma50,
+        ma200: live.ma200 ?? row.ma200,
+        vwap: live.vwap ?? row.vwap,
+        marketSnapshotTime: live.snapshotTime ?? marketSnapshot?.snapshotTime,
+      };
+
+      if (merged.koEstimated && Number.isFinite(Number(merged.leverage)) && Number.isFinite(Number(merged.underlyingPrice))) {
+        const lev = Number(merged.leverage);
+        const px = Number(merged.underlyingPrice);
+        merged.knockoutLevel = merged.direction === "BULL" ? px * (1 - 1 / lev) : px * (1 + 1 / lev);
+      }
+
+      return merged;
+    });
+
+    return overlayedRows
       .map((row) => ({ ...row, metrics: classify(row) }))
       .filter((row) => {
         const q = query.trim().toLowerCase();
@@ -367,7 +429,7 @@ export default function CertificateScannerDashboard() {
         return matchesQuery && matchesDirection && matchesSurvival && matchesSpread;
       })
       .sort((a, b) => b.metrics.score - a.metrics.score);
-  }, [sourceRows, query, direction, minSurvival, maxSpread]);
+  }, [sourceRows, marketSnapshot, query, direction, minSurvival, maxSpread]);
 
   const best = rows[0];
   const assumptionInfo = useMemo(() => assumptionsSummary(sourceRows, dataMeta), [sourceRows, dataMeta]);
@@ -385,6 +447,9 @@ export default function CertificateScannerDashboard() {
               <p className="mt-3 max-w-3xl text-zinc-400">
                 Ranks leveraged bull/bear certificates by expected underlying move, distance to knockout, spread cost, trend alignment, and RSI exhaustion risk.
               </p>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-400">
+                <Pill tone={marketSnapshot ? "good" : "warn"}>{marketStatus}</Pill>
+              </div>
               {dataMeta && (
                 <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-400">
                   {dataMeta.snapshotTime && <Pill>Snapshot {dataMeta.snapshotTime}</Pill>}
@@ -416,7 +481,7 @@ export default function CertificateScannerDashboard() {
             <div>
               <div className="text-base font-semibold">Data reality check</div>
               <p className="mt-1 max-w-4xl text-amber-100/80">
-                This is a scanner, not an execution tool. Nordnet certificate rows are real from the CSV, while underlying price, IV, hours left, and TA inputs are still manual snapshot assumptions.
+                This is a scanner, not an execution tool. Nordnet certificate rows are real from the CSV. Underlying price, IV, hours left, and TA inputs can now be overlaid from market-snapshot.json every 30 seconds.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 md:justify-end">
@@ -433,7 +498,7 @@ export default function CertificateScannerDashboard() {
             </div>
             <div className="rounded-2xl border border-amber-500/20 bg-zinc-950/40 p-3">
               <div className="font-medium text-amber-100">Manual snapshot</div>
-              <div className="mt-1">Underlying price, move %, IV, and hours left.</div>
+              <div className="mt-1">Underlying price, move %, IV, and hours left from market-snapshot.json when available.</div>
             </div>
             <div className="rounded-2xl border border-amber-500/20 bg-zinc-950/40 p-3">
               <div className="font-medium text-amber-100">Placeholder until wired</div>
@@ -553,7 +618,7 @@ export default function CertificateScannerDashboard() {
         <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5 text-sm text-zinc-400">
           <div className="font-medium text-zinc-200">Next build step</div>
           <p className="mt-2">
-            Replace mockRows with live adapters: Nordnet certificate scrape/export, underlying price feed, options IV proxy, and intraday TA calculation. Keep scoring deterministic and log every ranked decision for later backtesting.
+            Next: automate market-snapshot.json with a Worker or local script, then add live certificate bid/ask/spread refresh. Keep scoring deterministic and log every ranked decision for later backtesting.
           </p>
         </div>
       </div>
