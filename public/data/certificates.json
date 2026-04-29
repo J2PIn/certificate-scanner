@@ -1,0 +1,23 @@
+[
+  {
+    "isin": "FI0000000000",
+    "name": "BULL USTECH100 X20",
+    "underlying": "USTECH100",
+    "direction": "BULL",
+    "leverage": 20,
+    "underlyingPrice": 18450,
+    "underlyingMovePct": -1.32,
+    "knockoutLevel": 18020,
+    "bid": 0.94,
+    "ask": 0.96,
+    "ivAnnualPct": 24.5,
+    "hoursLeft": 3.5,
+    "rsi4": 12,
+    "ema8": 18472,
+    "ema21": 18518,
+    "ema65": 18610,
+    "ma50": 18640,
+    "ma200": 18820,
+    "vwap": 18555
+  }
+]
