@@ -207,6 +207,42 @@ function normalizeRow(row) {
   };
 }
 
+function parseSnapshotDate(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatAge(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "unknown";
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 1) return `${seconds}s`;
+  if (minutes < 60) return `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return `${hours}h ${remMinutes}m`;
+}
+
+function snapshotFreshness(snapshot) {
+  const observedAt = parseSnapshotDate(snapshot?.snapshotTime);
+  if (!snapshot) {
+    return { label: "Missing", tone: "bad", ageText: "no snapshot", warning: "No market snapshot loaded" };
+  }
+  if (!observedAt) {
+    return { label: "Unknown", tone: "warn", ageText: "unknown", warning: "Snapshot time is not parseable. Use ISO format like 2026-04-29T10:45:00+03:00." };
+  }
+
+  const ageMs = Date.now() - observedAt.getTime();
+  const ageText = formatAge(ageMs);
+  const minutes = ageMs / 60000;
+
+  if (minutes < 5) return { label: "Fresh", tone: "good", ageText, warning: "Snapshot is fresh enough for manual scanner mode." };
+  if (minutes < 20) return { label: "Warm", tone: "warn", ageText, warning: "Snapshot is getting old. Be careful with 15x–20x rows." };
+  return { label: "Expired", tone: "bad", ageText, warning: "Do not trust ranking until market-snapshot.json is refreshed." };
+}
+
 function assumptionsSummary(rows, meta) {
   const list = Array.isArray(rows) ? rows : [];
   const total = list.length;
@@ -313,6 +349,24 @@ function qualityTone(q) {
   if (q === "Good") return "good";
   if (q === "Warn") return "warn";
   return "bad";
+}
+
+function bucketCounts(rows) {
+  const counts = {
+    Candidate: 0,
+    Watch: 0,
+    Stretched: 0,
+    "Fuse too short": 0,
+    Avoid: 0,
+    "Data issue": 0,
+  };
+
+  for (const row of rows) {
+    const verdict = row.metrics?.verdict || "Data issue";
+    counts[verdict] = (counts[verdict] || 0) + 1;
+  }
+
+  return counts;
 }
 
 export default function CertificateScannerDashboard() {
@@ -436,6 +490,12 @@ export default function CertificateScannerDashboard() {
 
   const best = rows[0];
   const assumptionInfo = useMemo(() => assumptionsSummary(sourceRows, dataMeta), [sourceRows, dataMeta]);
+  const freshness = useMemo(() => snapshotFreshness(marketSnapshot), [marketSnapshot, marketFetchedAt]);
+  const buckets = useMemo(() => bucketCounts(rows), [rows]);
+  const topCandidates = useMemo(
+    () => rows.filter((row) => ["Candidate", "Watch"].includes(row.metrics?.verdict)).slice(0, 10),
+    [rows]
+  );
 
   return (
     <div className="min-h-screen bg-zinc-950 p-4 text-zinc-100 md:p-8">
@@ -480,6 +540,80 @@ export default function CertificateScannerDashboard() {
             </div>
           </div>
         </motion.div>
+
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-base font-semibold text-zinc-100">Snapshot freshness</div>
+              <p className="mt-1 max-w-4xl text-sm text-zinc-400">
+                Rankings are only useful when the market snapshot is fresh. The file timestamp should be an ISO timestamp for the moment the market values were observed.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              <Pill tone={freshness.tone}>{freshness.label}</Pill>
+              <Pill>Age {freshness.ageText}</Pill>
+              {marketFetchedAt && <Pill>Fetched {marketFetchedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</Pill>}
+            </div>
+          </div>
+          <div className={`mt-4 rounded-2xl border p-3 text-sm ${freshness.tone === "good" ? "border-emerald-500/20 bg-emerald-950/20 text-emerald-100" : freshness.tone === "warn" ? "border-amber-500/20 bg-amber-950/20 text-amber-100" : "border-rose-500/20 bg-rose-950/20 text-rose-100"}`}>
+            {freshness.warning}
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-6">
+          {Object.entries(buckets).map(([label, count]) => (
+            <div key={label} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+              <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+              <div className="mt-2 text-3xl font-semibold text-zinc-100">{count}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl">
+          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <div className="text-base font-semibold text-zinc-100">Top 10 current candidates</div>
+              <p className="mt-1 text-sm text-zinc-400">Candidate and Watch rows only, sorted by scanner score. Treat as a shortlist, not a trade signal.</p>
+            </div>
+            <Pill tone={topCandidates.length ? "good" : "warn"}>{topCandidates.length} rows</Pill>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[850px] text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-zinc-500">
+                <tr>
+                  <th className="py-2 pr-3">Certificate</th>
+                  <th className="py-2 pr-3">Dir</th>
+                  <th className="py-2 pr-3">Lev</th>
+                  <th className="py-2 pr-3">Survival</th>
+                  <th className="py-2 pr-3">Spread</th>
+                  <th className="py-2 pr-3">Score</th>
+                  <th className="py-2 pr-3">Verdict</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800">
+                {topCandidates.map((row) => (
+                  <tr key={`top-${row.isin}`} className="text-zinc-200">
+                    <td className="py-3 pr-3">
+                      <div className="font-medium">{row.name}</div>
+                      <div className="text-xs text-zinc-500">{row.isin}</div>
+                    </td>
+                    <td className="py-3 pr-3"><Pill tone={row.direction === "BULL" ? "good" : "bad"}>{row.direction}</Pill></td>
+                    <td className="py-3 pr-3">{row.leverage}x</td>
+                    <td className="py-3 pr-3">{row.metrics.survival.toFixed(2)}x</td>
+                    <td className="py-3 pr-3">{row.metrics.spread.toFixed(2)}%</td>
+                    <td className="py-3 pr-3 font-semibold">{row.metrics.score.toFixed(0)}</td>
+                    <td className="py-3 pr-3"><Pill tone={verdictTone(row.metrics.verdict)}>{row.metrics.verdict}</Pill></td>
+                  </tr>
+                ))}
+                {!topCandidates.length && (
+                  <tr>
+                    <td colSpan="7" className="py-5 text-zinc-500">No Candidate or Watch rows with the current filters/snapshot.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         <div className="rounded-3xl border border-amber-500/20 bg-amber-950/20 p-5 text-sm text-amber-100 shadow-xl">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
