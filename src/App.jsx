@@ -202,6 +202,8 @@ function normalizeRow(row) {
     ma50: Number(row.ma50),
     ma200: Number(row.ma200),
     vwap: Number(row.vwap),
+    nordnetTurnover: row.nordnetTurnover === undefined || row.nordnetTurnover === null || row.nordnetTurnover === "" ? undefined : Number(row.nordnetTurnover),
+    koEstimated: Boolean(row.koEstimated),
   };
 }
 
@@ -251,6 +253,7 @@ function classify(row) {
   if (spread > 2.5) warnings.push("wide spread");
   if (clean.ivAnnualPct < 5 || clean.ivAnnualPct > 80) warnings.push("check IV input");
   if (clean.hoursLeft > 12) warnings.push("hoursLeft seems high for intraday scan");
+  if (clean.koEstimated) warnings.push("KO estimated from leverage");
 
   return {
     em,
@@ -443,6 +446,7 @@ export default function CertificateScannerDashboard() {
                   <th className="px-3 py-2">Survival</th>
                   <th className="px-3 py-2">Spread</th>
                   <th className="px-3 py-2">RSI4</th>
+                  <th className="px-3 py-2">Turnover</th>
                   <th className="px-3 py-2">Score</th>
                   <th className="px-3 py-2">Data</th>
                   <th className="px-3 py-2">Verdict</th>
@@ -467,6 +471,7 @@ export default function CertificateScannerDashboard() {
                     <td className="px-3 py-4">{row.metrics.survival.toFixed(2)}x</td>
                     <td className="px-3 py-4">{row.metrics.spread.toFixed(2)}%</td>
                     <td className="px-3 py-4">{row.rsi4.toFixed(1)}</td>
+                    <td className="px-3 py-4">{row.nordnetTurnover === undefined ? "—" : Number(row.nordnetTurnover).toLocaleString()}</td>
                     <td className="px-3 py-4 font-semibold">{row.metrics.score.toFixed(0)}</td>
                     <td className="px-3 py-4">
                       <div className="flex flex-col gap-1">
