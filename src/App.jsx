@@ -131,14 +131,106 @@ function exhaustionPenalty(row) {
   return 0;
 }
 
+function requiredFieldIssues(row) {
+  const required = [
+    "isin",
+    "name",
+    "underlying",
+    "direction",
+    "leverage",
+    "underlyingPrice",
+    "underlyingMovePct",
+    "knockoutLevel",
+    "bid",
+    "ask",
+    "ivAnnualPct",
+    "hoursLeft",
+    "rsi4",
+    "ema8",
+    "ema21",
+    "ema65",
+    "ma50",
+    "ma200",
+    "vwap",
+  ];
+
+  const issues = [];
+  for (const key of required) {
+    const value = row[key];
+    if (value === undefined || value === null || value === "") issues.push(`missing ${key}`);
+  }
+
+  if (row.direction && !["BULL", "BEAR"].includes(String(row.direction).toUpperCase())) {
+    issues.push("direction must be BULL or BEAR");
+  }
+
+  for (const key of ["leverage", "underlyingPrice", "knockoutLevel", "bid", "ask", "ivAnnualPct", "hoursLeft"]) {
+    const value = Number(row[key]);
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "" && (!Number.isFinite(value) || value <= 0)) {
+      issues.push(`${key} must be positive`);
+    }
+  }
+
+  if (Number(row.bid) > 0 && Number(row.ask) > 0 && Number(row.ask) < Number(row.bid)) {
+    issues.push("ask below bid");
+  }
+
+  if (Number(row.rsi4) < 0 || Number(row.rsi4) > 100) {
+    issues.push("rsi4 outside 0–100");
+  }
+
+  return issues;
+}
+
+function normalizeRow(row) {
+  const direction = String(row.direction || "").toUpperCase();
+  return {
+    ...row,
+    direction,
+    leverage: Number(row.leverage),
+    underlyingMovePct: Number(row.underlyingMovePct),
+    underlyingPrice: Number(row.underlyingPrice),
+    knockoutLevel: Number(row.knockoutLevel),
+    bid: Number(row.bid),
+    ask: Number(row.ask),
+    ivAnnualPct: Number(row.ivAnnualPct),
+    hoursLeft: Number(row.hoursLeft),
+    rsi4: Number(row.rsi4),
+    ema8: Number(row.ema8),
+    ema21: Number(row.ema21),
+    ema65: Number(row.ema65),
+    ma50: Number(row.ma50),
+    ma200: Number(row.ma200),
+    vwap: Number(row.vwap),
+  };
+}
+
 function classify(row) {
-  const em = expectedMovePct(row.ivAnnualPct, row.hoursLeft);
-  const ko = koDistancePct(row);
+  const qualityIssues = requiredFieldIssues(row);
+  if (qualityIssues.length) {
+    return {
+      em: 0,
+      ko: 0,
+      survival: 0,
+      spread: 0,
+      levMove: 0,
+      trend: 0,
+      penalty: 0,
+      score: 0,
+      verdict: "Data issue",
+      qualityIssues,
+      quality: "Bad",
+    };
+  }
+
+  const clean = normalizeRow(row);
+  const em = expectedMovePct(clean.ivAnnualPct, clean.hoursLeft);
+  const ko = koDistancePct(clean);
   const survival = ko / Math.max(em, 0.01);
-  const spread = spreadPct(row);
-  const levMove = em * row.leverage;
-  const trend = trendScore(row);
-  const penalty = exhaustionPenalty(row);
+  const spread = spreadPct(clean);
+  const levMove = em * clean.leverage;
+  const trend = trendScore(clean);
+  const penalty = exhaustionPenalty(clean);
 
   let score = 0;
   score += Math.min(35, survival * 10);
@@ -154,7 +246,25 @@ function classify(row) {
   else if (survival < 1.2) verdict = "Fuse too short";
   else if (penalty >= 12) verdict = "Stretched";
 
-  return { em, ko, survival, spread, levMove, trend, penalty, score, verdict };
+  const warnings = [];
+  if (survival < 1.2) warnings.push("KO sits inside expected move");
+  if (spread > 2.5) warnings.push("wide spread");
+  if (clean.ivAnnualPct < 5 || clean.ivAnnualPct > 80) warnings.push("check IV input");
+  if (clean.hoursLeft > 12) warnings.push("hoursLeft seems high for intraday scan");
+
+  return {
+    em,
+    ko,
+    survival,
+    spread,
+    levMove,
+    trend,
+    penalty,
+    score,
+    verdict,
+    qualityIssues: warnings,
+    quality: warnings.length ? "Warn" : "Good",
+  };
 }
 
 function Pill({ children, tone = "neutral" }) {
@@ -171,6 +281,12 @@ function Pill({ children, tone = "neutral" }) {
 function verdictTone(v) {
   if (v === "Candidate") return "good";
   if (v === "Watch" || v === "Stretched") return "warn";
+  return "bad";
+}
+
+function qualityTone(q) {
+  if (q === "Good") return "good";
+  if (q === "Warn") return "warn";
   return "bad";
 }
 
@@ -316,6 +432,7 @@ export default function CertificateScannerDashboard() {
                   <th className="px-3 py-2">Spread</th>
                   <th className="px-3 py-2">RSI4</th>
                   <th className="px-3 py-2">Score</th>
+                  <th className="px-3 py-2">Data</th>
                   <th className="px-3 py-2">Verdict</th>
                 </tr>
               </thead>
@@ -339,6 +456,17 @@ export default function CertificateScannerDashboard() {
                     <td className="px-3 py-4">{row.metrics.spread.toFixed(2)}%</td>
                     <td className="px-3 py-4">{row.rsi4.toFixed(1)}</td>
                     <td className="px-3 py-4 font-semibold">{row.metrics.score.toFixed(0)}</td>
+                    <td className="px-3 py-4">
+                      <div className="flex flex-col gap-1">
+                        <Pill tone={qualityTone(row.metrics.quality)}>{row.metrics.quality}</Pill>
+                        {row.metrics.qualityIssues.length > 0 && (
+                          <div className="max-w-48 text-xs text-zinc-500" title={row.metrics.qualityIssues.join("; ")}>
+                            {row.metrics.qualityIssues.slice(0, 2).join("; ")}
+                            {row.metrics.qualityIssues.length > 2 ? " …" : ""}
+                          </div>
+                        )}
+                      </div>
+                    </td>
                     <td className="rounded-r-2xl px-3 py-4"><Pill tone={verdictTone(row.metrics.verdict)}>{row.metrics.verdict}</Pill></td>
                   </tr>
                 ))}
