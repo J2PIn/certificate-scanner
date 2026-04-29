@@ -207,6 +207,28 @@ function normalizeRow(row) {
   };
 }
 
+function assumptionsSummary(rows, meta) {
+  const list = Array.isArray(rows) ? rows : [];
+  const total = list.length;
+  const estimatedKo = list.filter((r) => r.koEstimated).length;
+  const withTurnover = list.filter((r) => r.nordnetTurnover !== undefined && r.nordnetTurnover !== null && r.nordnetTurnover !== "").length;
+  const uniqueUnderlyings = [...new Set(list.map((r) => r.underlying).filter(Boolean))];
+  const sample = list[0] || {};
+
+  const taFlat = ["ema8", "ema21", "ema65", "ma50", "ma200", "vwap"].every((key) => Number(sample[key]) === Number(sample.underlyingPrice));
+
+  return {
+    total,
+    estimatedKo,
+    withTurnover,
+    uniqueUnderlyings,
+    taFlat,
+    snapshotTime: meta?.snapshotTime,
+    source: meta?.source,
+    warning: meta?.warning,
+  };
+}
+
 function classify(row) {
   const qualityIssues = requiredFieldIssues(row);
   if (qualityIssues.length) {
@@ -348,6 +370,7 @@ export default function CertificateScannerDashboard() {
   }, [sourceRows, query, direction, minSurvival, maxSpread]);
 
   const best = rows[0];
+  const assumptionInfo = useMemo(() => assumptionsSummary(sourceRows, dataMeta), [sourceRows, dataMeta]);
 
   return (
     <div className="min-h-screen bg-zinc-950 p-4 text-zinc-100 md:p-8">
@@ -387,6 +410,41 @@ export default function CertificateScannerDashboard() {
             </div>
           </div>
         </motion.div>
+
+        <div className="rounded-3xl border border-amber-500/20 bg-amber-950/20 p-5 text-sm text-amber-100 shadow-xl">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-base font-semibold">Data reality check</div>
+              <p className="mt-1 max-w-4xl text-amber-100/80">
+                This is a scanner, not an execution tool. Nordnet certificate rows are real from the CSV, while underlying price, IV, hours left, and TA inputs are still manual snapshot assumptions.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              <Pill tone="warn">Rows {assumptionInfo.total}</Pill>
+              <Pill tone="warn">KO estimated {assumptionInfo.estimatedKo}</Pill>
+              <Pill tone="neutral">Turnover rows {assumptionInfo.withTurnover}</Pill>
+              {assumptionInfo.taFlat && <Pill tone="bad">TA placeholder mode</Pill>}
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 text-xs text-amber-100/75 md:grid-cols-4">
+            <div className="rounded-2xl border border-amber-500/20 bg-zinc-950/40 p-3">
+              <div className="font-medium text-amber-100">Real from CSV</div>
+              <div className="mt-1">Name, ISIN, direction, leverage, bid, ask, turnover.</div>
+            </div>
+            <div className="rounded-2xl border border-amber-500/20 bg-zinc-950/40 p-3">
+              <div className="font-medium text-amber-100">Manual snapshot</div>
+              <div className="mt-1">Underlying price, move %, IV, and hours left.</div>
+            </div>
+            <div className="rounded-2xl border border-amber-500/20 bg-zinc-950/40 p-3">
+              <div className="font-medium text-amber-100">Placeholder until wired</div>
+              <div className="mt-1">EMA/MA, RSI4, and VWAP unless manually entered.</div>
+            </div>
+            <div className="rounded-2xl border border-amber-500/20 bg-zinc-950/40 p-3">
+              <div className="font-medium text-amber-100">Not exact yet</div>
+              <div className="mt-1">KO is estimated from leverage. Replace with exact issuer KO later.</div>
+            </div>
+          </div>
+        </div>
 
         <div className="grid gap-4 md:grid-cols-4">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
